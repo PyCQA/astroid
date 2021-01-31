@@ -544,6 +544,17 @@ class BuilderTest(unittest.TestCase):
         self.assertIsInstance(inferred, nodes.Const)
         self.assertEqual(inferred.value, NotImplemented)
 
+    def test_correct_function_type_comment_parent(self):
+        data = """
+            def f(a):
+                # type: (A) -> A
+                pass
+        """
+        astroid = builder.parse(data)
+        f = astroid.body[0]
+        self.assertIs(f.type_comment_args[0].parent, f)
+        self.assertIs(f.type_comment_returns.parent, f)
+
 
 class FileBuildTest(unittest.TestCase):
     def setUp(self):
