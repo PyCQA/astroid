@@ -1853,6 +1853,21 @@ def test_guard_exits(
     _assert_kept(node2, fail_val)
 
 
+def test_multiple_preceding_guards() -> None:
+    """Test that constraints from successive guards accumulate."""
+    node = builder.extract_node("""
+    def f(first, second):
+        x = None if first else (0 if second else 5)
+        if x is None:
+            return
+        if x == 0:
+            return
+        x  #@
+    """)
+
+    assert _values(node) == [5]
+
+
 @pytest.mark.parametrize("exit_stmt", ("continue", "break"))
 def test_guard_loop_exits(exit_stmt: str) -> None:
     """Test that continue and break exit the rest of the loop body."""
@@ -2236,6 +2251,21 @@ def test_guard_assignment(condition: str, assignment: str) -> None:
     """)
 
     assert _values(node) == [Uninferable, 1]
+
+
+def test_multiple_preceding_assignment_guards() -> None:
+    """Test that a later guard constrains an earlier guard's replacement value."""
+    node = builder.extract_node("""
+    def f(first, second):
+        x = None if first else (0 if second else 5)
+        if x is None:
+            x = 0
+        if x == 0:
+            x = 1
+        x  #@
+    """)
+
+    assert _values(node) == [5, 1]
 
 
 def test_guard_assignment_with_orelse() -> None:
