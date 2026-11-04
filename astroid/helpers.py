@@ -126,8 +126,8 @@ def _object_type_is_subclass(
 
         for obj_subclass in obj_mro:
             if obj_subclass == klass or (
-                hasattr(obj_subclass, 'qname')
-                and hasattr(klass, 'qname')
+                hasattr(obj_subclass, "qname")
+                and hasattr(klass, "qname")
                 and obj_subclass.qname() == klass.qname()
             ):
                 return True
