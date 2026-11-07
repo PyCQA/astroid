@@ -413,6 +413,17 @@ INT_FLAG_ADDITION_METHODS = """
 """
 
 
+def _enum_member_return_value(stmt: nodes.Assign | nodes.AnnAssign) -> object:
+    """Return the source of the ``value`` of an enum member defined by ``stmt``."""
+    if stmt.value is None:
+        return None
+    if isinstance(stmt.value, nodes.Const):
+        if isinstance(stmt.value.value, str):
+            return repr(stmt.value.value)
+        return stmt.value.value
+    return stmt.value.as_string()
+
+
 def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
     """Specific inference for enums."""
     try:
@@ -428,14 +439,32 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
         dunder_members = {}
         target_names = set()
         for local, values in node.locals.items():
-            if (
-                any(not isinstance(value, nodes.AssignName) for value in values)
-                or local == "_ignore_"
-            ):
+            if local == "_ignore_":
                 continue
 
             stmt = values[0].statement()
-            if isinstance(stmt, nodes.Assign):
+            import_stmt = ""
+            if all(
+                isinstance(value, (nodes.Import, nodes.ImportFrom)) for value in values
+            ):
+                # A name bound by an import in the class body is a member,
+                # just like a name bound by an assignment. Its value is
+                # whatever the import binds, so replay the import when
+                # inferring ``value``.
+                import_stmt = stmt.as_string()
+                targets = [
+                    nodes.AssignName(
+                        local,
+                        lineno=stmt.lineno,
+                        col_offset=stmt.col_offset,
+                        parent=stmt.parent,
+                        end_lineno=stmt.end_lineno,
+                        end_col_offset=stmt.end_col_offset,
+                    )
+                ]
+            elif any(not isinstance(value, nodes.AssignName) for value in values):
+                continue
+            elif isinstance(stmt, nodes.Assign):
                 if isinstance(stmt.targets[0], nodes.Tuple):
                     targets = stmt.targets[0].itered()
                 else:
@@ -445,15 +474,9 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
             else:
                 continue
 
-            inferred_return_value = None
-            if stmt.value is not None:
-                if isinstance(stmt.value, nodes.Const):
-                    if isinstance(stmt.value.value, str):
-                        inferred_return_value = repr(stmt.value.value)
-                    else:
-                        inferred_return_value = stmt.value.value
-                else:
-                    inferred_return_value = stmt.value.as_string()
+            inferred_return_value = (
+                local if import_stmt else _enum_member_return_value(stmt)
+            )
 
             new_targets = []
             for target in targets:
@@ -466,9 +489,11 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
                 class {name}({types}):
                     @property
                     def value(self):
+                        {import_stmt}
                         return {return_value}
                     @property
                     def _value_(self):
+                        {import_stmt}
                         return {return_value}
                     @property
                     def name(self):
@@ -480,6 +505,7 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
                         name=target.name,
                         types=", ".join(node.basenames),
                         return_value=inferred_return_value,
+                        import_stmt=import_stmt,
                     )
                 )
                 if "IntFlag" in basename:
@@ -496,7 +522,7 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
                 for method in node.mymethods():
                     fake.locals[method.name] = [method]
                 new_targets.append(fake.instantiate_class())
-                if stmt.value is None:
+                if not import_stmt and stmt.value is None:
                     continue
                 dunder_members[local] = fake
             node.locals[local] = new_targets
