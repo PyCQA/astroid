@@ -127,7 +127,6 @@ class AstroidManager:
             return
 
         AstroidManager.brain["prefer_stubs"] = value
-        # The synthetic builtins module does not depend on source discovery
         for modname in tuple(self.astroid_cache):
             if modname != "builtins":
                 self.astroid_cache.pop(modname)
@@ -135,11 +134,12 @@ class AstroidManager:
 
     @staticmethod
     def _invalidate_inference_caches() -> None:
-        # Inference dependencies are not tracked, so invalidate both caches
-        # pylint: disable-next=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from astroid.constraint import clear_preceding_guards_cache
         from astroid.inference_tip import clear_inference_tip_cache
 
         clear_inference_tip_cache()
+        clear_preceding_guards_cache()
         _invalidate_cache()
 
     def visit_transforms(self, node: nodes.NodeNG) -> InferenceResult:
