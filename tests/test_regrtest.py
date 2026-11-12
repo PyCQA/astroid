@@ -472,7 +472,7 @@ def test_max_inferred_for_complicated_class_hierarchy() -> None:
     # Reset inference limit
     InferenceContext.max_inferred = 100
     # Check that we don't crash on a previously uninferable node
-    assert super_node.getattr("__init__", context=context)[0] == Uninferable
+    assert isinstance(super_node.getattr("__init__", context=context)[0], bases.BoundMethod)
 
 
 @mock.patch(
@@ -589,3 +589,37 @@ def test_regression_parse_deeply_nested_parentheses() -> None:
         SyntaxError if platform.python_implementation() == "PyPy" else MemoryError
     )
     assert isinstance(ctx.value.error, expected)
+
+
+def test_regression_inference_budget_exhaustion_does_not_poison_cache() -> None:
+    """Regression test for pylint-dev/astroid#3464.
+
+    When NodeNG.infer() stops early because the context budget is exhausted
+    (nodes_inferred > max_inferred), it must not cache the incomplete Uninferable
+    result into the shared inference cache.
+    """
+    module = parse(
+        """
+    class Base:
+        @classmethod
+        def __class_getitem__(cls, item):
+            return cls
+
+    class Child(Base):
+        pass
+    """
+    )
+    child = module.locals["Child"][0]
+    base_expression = child.bases[0]
+
+    InferenceContext().inferred.clear()
+
+    exhausted = InferenceContext()
+    exhausted.nodes_inferred = exhausted.max_inferred + 1
+    assert list(base_expression.infer(exhausted)) == [Uninferable]
+
+    # Fresh context must not reuse the incomplete Uninferable result
+    fresh = list(base_expression.infer())
+    assert len(fresh) == 1
+    assert fresh[0].name == "Base"
+    assert [base.name for base in child.ancestors()] == ["Base", "object"]

@@ -1,0 +1,5 @@
+Avoid caching incomplete ``Uninferable`` results in the shared inference
+cache when ``NodeNG.infer()`` stops early due to ``InferenceContext`` budget
+exhaustion (``nodes_inferred > max_inferred``).
+
+Closes #3464
