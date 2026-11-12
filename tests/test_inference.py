@@ -1096,6 +1096,56 @@ class InferenceTest(resources.SysPathSetup, unittest.TestCase):
         assert isinstance(inferred[0], nodes.Const)
         assert inferred[0].value == 4
 
+    def test_truncated_inference_is_not_cached_across_warm_up(self) -> None:
+        """Inferring a method first must not poison a later inference.
+
+        Reproduction reported by Mark Mayo on
+        https://github.com/pylint-dev/astroid/issues/3383: inferring a method
+        whose body exhausts the budget pins the truncated ``Uninferable`` for
+        ``self.options`` in the shared inference cache, so inferring that very
+        node afterwards with a fresh budget replayed it instead of resolving
+        it.
+        """
+        # Enough chained comparisons to exhaust the default budget of 100
+        # inferred nodes through a normal inference, no mocking involved.
+        attr_count = 30
+        assignments = "\n".join(
+            f"        self.attr{i} = None" for i in range(attr_count)
+        )
+        checks = " and ".join(f"self.attr{i} is None" for i in range(attr_count))
+        code = (
+            "class Entity:\n"
+            "    def __init__(self):\n"
+            "        self._options = []\n"
+            f"{assignments}\n"
+            "\n"
+            "    @property\n"
+            "    def options(self):\n"
+            "        return self._options\n"
+            "\n"
+            "    def is_default(self):\n"
+            f"        return ({checks} and self.options == [])\n"
+        )
+
+        def infer_options(warm_up: bool) -> list[nodes.NodeNG]:
+            module = parse(code)
+            method = module["Entity"]["is_default"]
+            target = next(
+                node
+                for node in method.nodes_of_class(nodes.Compare)
+                if node.ops[0][0] == "=="
+            ).left
+            if warm_up:
+                list(method.infer_call_result(caller=method))
+            return list(target.infer())
+
+        for label, inferred in (
+            ("cold", infer_options(False)),
+            ("warm", infer_options(True)),
+        ):
+            assert len(inferred) == 1, f"{label} inference: {inferred}"
+            assert isinstance(inferred[0], nodes.List), f"{label} inference: {inferred}"
+
     def _test_const_inferred(self, node: nodes.AssignName, value: float | str) -> None:
         inferred = list(node.infer())
         self.assertEqual(len(inferred), 1)
