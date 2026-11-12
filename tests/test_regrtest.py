@@ -472,7 +472,9 @@ def test_max_inferred_for_complicated_class_hierarchy() -> None:
     # Reset inference limit
     InferenceContext.max_inferred = 100
     # Check that we don't crash on a previously uninferable node
-    assert isinstance(super_node.getattr("__init__", context=context)[0], bases.BoundMethod)
+    assert isinstance(
+        super_node.getattr("__init__", context=context)[0], bases.BoundMethod
+    )
 
 
 @mock.patch(
@@ -598,8 +600,7 @@ def test_regression_inference_budget_exhaustion_does_not_poison_cache() -> None:
     (nodes_inferred > max_inferred), it must not cache the incomplete Uninferable
     result into the shared inference cache.
     """
-    module = parse(
-        """
+    module = parse("""
     class Base:
         @classmethod
         def __class_getitem__(cls, item):
@@ -607,8 +608,7 @@ def test_regression_inference_budget_exhaustion_does_not_poison_cache() -> None:
 
     class Child(Base):
         pass
-    """
-    )
+    """)
     child = module.locals["Child"][0]
     base_expression = child.bases[0]
 
