@@ -111,7 +111,7 @@ class BooleanConstraint(Constraint):
         - negate=False: satisfied if boolean value is True
         - negate=True: satisfied if boolean value is False
         """
-        inferred_booleaness = inferred.bool_value()
+        inferred_booleaness = inferred.bool_value(context.clone())
         if inferred is util.Uninferable or inferred_booleaness is util.Uninferable:
             return True
 
