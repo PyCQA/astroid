@@ -388,6 +388,11 @@ def infer_special_alias(
         res = next(node.args[0].infer(context=ctx))
     except StopIteration as e:
         raise InferenceError(node=node.args[0], context=ctx) from e
+    if not isinstance(res, nodes.ClassDef):
+        # e.g. Uninferable when the inference budget of ``ctx`` is exhausted.
+        # Don't build and pin a class without its base: a later inference
+        # with a fresh context must still get the right one.
+        raise UseInferenceDefault
 
     assign_name = node.parent.targets[0]
     class_def = nodes.ClassDef(

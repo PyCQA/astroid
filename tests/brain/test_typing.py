@@ -4,8 +4,9 @@
 
 import pytest
 
-from astroid import bases, builder, nodes
+from astroid import bases, builder, nodes, util
 from astroid.const import PY312_PLUS, PY314_PLUS
+from astroid.context import InferenceContext
 from astroid.exceptions import AttributeInferenceError
 
 
@@ -187,3 +188,37 @@ class TestSpecialAlias:
         # Should not raise IndexError
         module = builder.parse(code)
         assert isinstance(module, nodes.Module)
+
+    @pytest.mark.parametrize(
+        "code,base",
+        [
+            (
+                "import collections.abc\n"
+                "class _CallableType: ...\n"
+                "Callable = _CallableType(collections.abc.Callable, 2)",
+                "_collections_abc.Callable",
+            ),
+            ("class _TupleType: ...\nTuple = _TupleType(tuple, -1)", "builtins.tuple"),
+        ],
+    )
+    def test_special_alias_uninferable_aliased_class(
+        self, code: str, base: str
+    ) -> None:
+        """
+        Regression test for: https://github.com/pylint-dev/astroid/issues/3366
+
+        If the aliased class is uninferable because the inference budget of the
+        context is exhausted, no class must be built: a later inference with a
+        fresh context must still get the aliased class as a base.
+        """
+        assign = builder.extract_node(code)
+        ctx = InferenceContext()
+        ctx.nodes_inferred = ctx.max_inferred + 1
+        assert next(assign.value.infer(context=ctx)) is util.Uninferable
+
+        inferred = next(assign.value.infer())
+        assert isinstance(inferred, nodes.ClassDef)
+        assert [anc.qname() for anc in inferred.ancestors()] == [
+            base,
+            "builtins.object",
+        ]
