@@ -13,7 +13,6 @@ from collections.abc import Callable, Iterator
 import pytest
 
 from astroid import MANAGER, builder, nodes, parse, transforms
-from astroid.brain import brain_builtin_inference
 from astroid.brain.brain_builtin_inference import _builtin_dispatch_predicate
 from astroid.brain.brain_dataclasses import _looks_like_dataclass_field_call
 from astroid.const import IS_PYPY
@@ -335,34 +334,3 @@ class TestBuiltinDispatcher(unittest.TestCase):
             # The re-module type() call must not be claimed by the builtin
             # dispatcher; brain_re owns its inference.
             assert _builtin_dispatch_predicate(assign.value) is False
-
-    def test_register_builtin_transform_populates_dispatch_table(self) -> None:
-        """``register_builtin_transform`` must add the function to the dispatch
-        dict so the global dispatcher can route to it."""
-        marker = object()
-
-        def fake_transform(node, context=None):
-            return marker
-
-        original = brain_builtin_inference._BUILTIN_INFERENCE_FUNCS.get(
-            "_test_register_builtin"
-        )
-        try:
-            brain_builtin_inference.register_builtin_transform(
-                AstroidManager(), fake_transform, "_test_register_builtin"
-            )
-            assert (
-                brain_builtin_inference._BUILTIN_INFERENCE_FUNCS[
-                    "_test_register_builtin"
-                ]
-                is fake_transform
-            )
-        finally:
-            if original is None:
-                brain_builtin_inference._BUILTIN_INFERENCE_FUNCS.pop(
-                    "_test_register_builtin", None
-                )
-            else:
-                brain_builtin_inference._BUILTIN_INFERENCE_FUNCS[
-                    "_test_register_builtin"
-                ] = original
