@@ -2089,7 +2089,11 @@ class ClassDef(
         context: InferenceContext | None = None,
     ) -> Iterator[InferenceResult]:
         """infer what a class is returning when called"""
-        if self.is_subtype_of("builtins.type", context) and len(caller.args) == 3:
+        if (
+            caller is not None
+            and self.is_subtype_of("builtins.type", context)
+            and len(caller.args) == 3
+        ):
             result = self._infer_type_call(caller, context)
             yield result
             return
@@ -2548,7 +2552,12 @@ class ClassDef(
 
         def _valid_getattr(node):
             root = node.root()
-            return root.name != "builtins" and getattr(root, "pure_python", None)
+            # An uninferable __getattr__ has an Uninferable root.
+            return (
+                isinstance(root, Module)
+                and root.name != "builtins"
+                and root.pure_python
+            )
 
         try:
             return _valid_getattr(self.getattr("__getattr__", context)[0])

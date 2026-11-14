@@ -1387,6 +1387,16 @@ class TestLenBuiltinInference:
         with pytest.raises(InferenceError):
             next(node.infer())
 
+    def test_len_object_dunder_len_not_callable(self) -> None:
+        node = astroid.extract_node("""
+        import os
+        class F:
+            __len__ = os
+        len(F())
+        """)
+        with pytest.raises(InferenceError):
+            next(node.infer())
+
     def test_len_string(self) -> None:
         node = astroid.extract_node("""
         len("uwu")
@@ -1587,6 +1597,8 @@ def test_infer_dict_from_keys() -> None:
     dict.fromkeys(some_other_value) #@
     dict.fromkeys([Unknown(), Unknown()]) #@
     dict.fromkeys([Unknown(), Unknown()]) #@
+    dict.fromkeys({(1, 2): 3}) #@
+    dict.fromkeys(1) #@
     """)
     for node in good_nodes:
         inferred = next(node.infer())

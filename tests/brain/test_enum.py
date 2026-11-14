@@ -639,3 +639,18 @@ class EnumBrainTest(unittest.TestCase):
         assert isinstance(inferred, nodes.Dict)
         member_names = [key.value for key, _ in inferred.items]
         assert member_names == ["A", "B"]
+
+    def test_enum_chained_assignment_attribute_target_no_crash(self) -> None:
+        """A chained assignment whose target is an attribute names no member.
+
+        Regression test for https://github.com/pylint-dev/astroid/issues/3257
+        """
+        node = builder.extract_node("""
+        import enum
+
+        class C(enum.Enum):  #@
+            x = a.b = 1
+        """)
+        # ``a.b`` is an ``AssignAttr`` target with no ``name`` attribute.
+        inferred = next(node.infer())
+        assert isinstance(inferred, nodes.ClassDef)

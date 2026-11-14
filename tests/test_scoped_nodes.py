@@ -752,6 +752,21 @@ class FunctionNodeTest(ModuleLoader, unittest.TestCase):
         self.assertEqual(node.locals["staticmethod_wrapped"][0].type, "staticmethod")
         self.assertEqual(node.locals["long_classmethod"][0].type, "classmethod")
 
+    def test_decorator_factory_returning_classmethod_subclass(self) -> None:
+        node = builder.extract_node("""
+        class my_classmethod(classmethod):
+            pass
+
+        def factory():
+            return my_classmethod
+
+        class SomeClass:
+            @factory()
+            def method(cls):
+                pass
+        """)
+        self.assertEqual(node.locals["method"][0].type, "classmethod")
+
     def test_igetattr(self) -> None:
         func = builder.extract_node("""
         def test():
@@ -2170,6 +2185,20 @@ class ClassNodeTest(ModuleLoader, unittest.TestCase):
         module = astroid_builder.module_build(difflib)
         self.assertFalse(module["SequenceMatcher"].has_dynamic_getattr())
 
+    def test_has_dynamic_getattr_uninferable_in_metaclass(self) -> None:
+        """An uninferable ``__getattr__`` found in the metaclass is not dynamic.
+
+        The result used to be ``Uninferable`` instead of a bool.
+        """
+        node = builder.extract_node("""
+        class Meta(type):
+            __getattr__ = undefined_name
+
+        class A(metaclass=Meta):  #@
+            pass
+        """)
+        self.assertIs(node.has_dynamic_getattr(), False)
+
     def test_duplicate_bases_namedtuple(self) -> None:
         module = builder.parse("""
         import collections
@@ -2675,6 +2704,19 @@ def test_metaclass_call_result_without_context() -> None:
     for caller in (call, None):
         inferred = list(cls.infer_call_result(caller=caller))
         assert [getattr(n, "value", None) for n in inferred] == [42]
+
+
+def test_type_subclass_call_result_without_caller() -> None:
+    # Regression: ClassDef.infer_call_result may be called through the public
+    # API without a caller (it accepts None). For a subclass of ``type``, the
+    # three-argument ``type(name, bases, dict)`` check read ``caller.args``
+    # unguarded, crashing with "AttributeError: 'NoneType' object has no
+    # attribute 'args'". It should infer an instance of the metaclass instead.
+    node = builder.extract_node("class Meta(type): pass")
+    inferred = list(node.infer_call_result(caller=None))
+    assert len(inferred) == 1
+    assert isinstance(inferred[0], Instance)
+    assert inferred[0].qname() == ".Meta"
 
 
 @pytest.mark.parametrize(
