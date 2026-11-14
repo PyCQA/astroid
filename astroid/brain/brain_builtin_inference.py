@@ -1101,10 +1101,10 @@ def _infer_str_format_call(
 # dispatcher transform registered for ``nodes.Call``. One transform-list entry
 # per builtin would run its own predicate on every Call node; the dispatcher
 # does the ``isinstance``/name lookup once and routes via this dict.
-_BUILTIN_INFERENCE_FUNCS: dict[
-    str,
-    Callable[[nodes.Call, InferenceContext | None], SuccessfulInferenceResult | None],
-] = {
+_BuiltinInferFn = Callable[
+    [nodes.Call, InferenceContext | None], SuccessfulInferenceResult | None
+]
+_BUILTIN_INFERENCE_FUNCS: dict[str, _BuiltinInferFn] = {
     "bool": infer_bool,
     "super": infer_super,
     "callable": infer_callable,
