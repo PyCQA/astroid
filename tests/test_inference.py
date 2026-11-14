@@ -6064,12 +6064,15 @@ def test_class_attribute_assigned_through_the_class() -> None:
     Child.get()  #@
     Registry.names  #@
     Registry.version  #@
+    Registry.entries  #@
     """
-    entries, names, child_entries, class_names, version = (
+    entries, names, child_entries, class_names, version, class_entries = (
         [inferred.pytype() for inferred in node.inferred()]
         for node in extract_node(code)
     )
-    assert entries == child_entries == ["builtins.NoneType", "builtins.dict"]
+    # The ``is None`` check rules ``None`` out once ``cls.entries`` is assigned.
+    assert entries == child_entries == ["builtins.dict"]
+    assert class_entries == ["builtins.NoneType", "builtins.dict"]
     assert names == class_names == ["builtins.NoneType", "builtins.list"]
     assert version == ["builtins.int", "builtins.str"]
 
