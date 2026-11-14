@@ -80,7 +80,9 @@ def _is_property(
         for name in decoratornames
         if not isinstance(name, UninferableBase)
     }
-    if any(name in stripped for name in POSSIBLE_PROPERTIES):
+    # The names are only a guess, and a property-like decorator only makes
+    # sense in a class body: a function elsewhere stays a function.
+    if meth.is_method() and any(name in stripped for name in POSSIBLE_PROPERTIES):
         return True
 
     if not meth.decorators:

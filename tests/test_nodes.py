@@ -25,6 +25,7 @@ from astroid import (
     builder,
     extract_node,
     nodes,
+    objects,
     parse,
     transforms,
     util,
@@ -1150,6 +1151,43 @@ class BoundMethodNodeTest(unittest.TestCase):
             "DynamicClassA",
         ):
             self._is_property(ast, prop)
+
+    def test_possible_property_name_outside_class(self) -> None:
+        # A decorator with a POSSIBLE_PROPERTIES name only makes a property
+        # in a class body: elsewhere, the function stays a callable function.
+        ast = builder.parse("""
+        def lazy(func): return func
+        def reify(func): return func
+
+        @lazy
+        def lazy_function(): return 42
+
+        @reify
+        def reified_function(): return 42
+
+        def outer():
+            @lazy
+            def inner(): return 42
+            return inner
+        """)
+        for function in (
+            ast["lazy_function"],
+            ast["reified_function"],
+            ast["outer"].body[0],
+        ):
+            inferred = next(function.infer())
+            self.assertNotIsInstance(inferred, objects.Property, function.name)
+            self.assertTrue(inferred.callable(), function.name)
+
+    def test_standard_property_outside_class(self) -> None:
+        # A real property object is not callable, wherever it is defined
+        ast = builder.parse("""
+        @property
+        def color(): return "red"
+        """)
+        inferred = next(ast["color"].infer())
+        self.assertIsInstance(inferred, objects.Property)
+        self.assertFalse(inferred.callable())
 
     def test_is_standard_property_subclass(self) -> None:
         # Test to make sure that subclasses of the Python-provided property decorators
