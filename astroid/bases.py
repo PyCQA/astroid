@@ -82,7 +82,9 @@ def _is_property(
     }
     # The names are only a guess, and a property-like decorator only makes
     # sense in a class body: a function elsewhere stays a function.
-    if meth.is_method() and any(name in stripped for name in POSSIBLE_PROPERTIES):
+    if any(name in stripped for name in POSSIBLE_PROPERTIES) and isinstance(
+        meth.parent.frame(), nodes.ClassDef
+    ):
         return True
 
     if not meth.decorators:
