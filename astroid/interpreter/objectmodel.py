@@ -1086,7 +1086,7 @@ class PropertyModel(ObjectModel):
     # pylint: enable=import-outside-toplevel
 
 
-class TemplateStrModel(ObjectModel):
+class TemplateStrModel(InstanceModel):
     """Object model for ``string.templatelib.Template`` instances (t-strings).
 
     The ``strings``, ``values`` and ``interpolations`` members are
@@ -1107,7 +1107,7 @@ class TemplateStrModel(ObjectModel):
         return self._instance.template_interpolations()
 
 
-class InterpolationModel(ObjectModel):
+class InterpolationModel(InstanceModel):
     """Object model for ``string.templatelib.Interpolation`` instances."""
 
     @property

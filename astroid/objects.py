@@ -18,7 +18,7 @@ from functools import cached_property
 from typing import Literal, NoReturn, Self
 
 from astroid import bases, util
-from astroid.context import InferenceContext
+from astroid.context import InferenceContext, copy_context
 from astroid.exceptions import (
     AttributeInferenceError,
     InferenceError,
@@ -255,24 +255,48 @@ class DictInstance(bases.Instance):
     special_attributes = objectmodel.DictModel()
 
 
+def _infer_or_uninferable(
+    context: InferenceContext | None, node: node_classes.NodeNG
+) -> InferenceResult:
+    """Infer *node* in a copy of *context*, or ``Uninferable`` if ambiguous."""
+    inferred = util.safe_infer(node, copy_context(context))
+    return inferred if inferred is not None else util.Uninferable
+
+
 class TemplateStrInstance(bases.Instance):
     """Instance of ``string.templatelib.Template`` (a t-string result).
 
     It carries the originating :class:`TemplateStr` node so that the
     ``strings``, ``values`` and ``interpolations`` members can be inferred
     from the actual template contents, mirroring PEP 750 runtime semantics.
+    The inference context the t-string was inferred in is kept too, so that
+    the interpolated expressions resolve the same way (e.g. function arguments
+    bound by a call).
     """
 
     special_attributes = objectmodel.TemplateStrModel()
 
-    def __init__(self, proxied: scoped_nodes.ClassDef, node: node_classes.TemplateStr):
+    def __init__(
+        self,
+        proxied: scoped_nodes.ClassDef,
+        node: node_classes.TemplateStr,
+        context: InferenceContext | None = None,
+    ) -> None:
         super().__init__(proxied)
         self._node = node
+        self._context = context.clone() if context is not None else None
 
-    def _tuple(self, elts: list) -> node_classes.Tuple:
+    def _tuple(self, elts: list[InferenceResult]) -> node_classes.Tuple:
         tuple_node = node_classes.Tuple(parent=self._node)
-        tuple_node.postinit(elts=elts)
+        tuple_node.postinit(elts=elts)  # type: ignore[arg-type]
         return tuple_node
+
+    def _interpolations(self) -> list[node_classes.Interpolation]:
+        return [
+            value
+            for value in self._node.values
+            if isinstance(value, node_classes.Interpolation)
+        ]
 
     def template_strings(self) -> node_classes.Tuple:
         # ``strings`` is the constant segments around each interpolation, with
@@ -292,20 +316,45 @@ class TemplateStrInstance(bases.Instance):
         return self._tuple([node_classes.Const(string) for string in strings])
 
     def template_interpolations(self) -> node_classes.Tuple:
-        elts: list = []
-        for value in self._node.values:
-            if isinstance(value, node_classes.Interpolation):
-                inferred = util.safe_infer(value)
-                elts.append(inferred if inferred is not None else util.Uninferable)
-        return self._tuple(elts)
+        return self._tuple(
+            [
+                _infer_or_uninferable(self._context, value)
+                for value in self._interpolations()
+            ]
+        )
 
     def template_values(self) -> node_classes.Tuple:
-        elts: list = []
-        for value in self._node.values:
-            if isinstance(value, node_classes.Interpolation):
-                inferred = util.safe_infer(value.value)
-                elts.append(inferred if inferred is not None else util.Uninferable)
-        return self._tuple(elts)
+        return self._tuple(
+            [
+                _infer_or_uninferable(self._context, value.value)
+                for value in self._interpolations()
+            ]
+        )
+
+    def infer_binary_op(
+        self,
+        opnode: node_classes.AugAssign | node_classes.BinOp,
+        operator: str,
+        other: InferenceResult,
+        context: InferenceContext,
+        method: SuccessfulInferenceResult,
+    ) -> Generator[InferenceResult]:
+        # ``Template + Template`` concatenates both templates. Anything else
+        # (e.g. ``Template + str``) raises ``TypeError`` at runtime. The
+        # reflected ``__radd__`` is never reached with two templates, since
+        # ``__add__`` already succeeds on the left one.
+        if operator == "+" and isinstance(other, TemplateStrInstance):
+            concatenated = node_classes.TemplateStr(
+                lineno=opnode.lineno,
+                col_offset=opnode.col_offset,
+                parent=opnode,
+                end_lineno=opnode.end_lineno,
+                end_col_offset=opnode.end_col_offset,
+            )
+            concatenated.postinit(values=[*self._node.values, *other._node.values])
+            yield TemplateStrInstance(self._proxied, concatenated, context)
+            return
+        yield util.Uninferable
 
 
 class InterpolationInstance(bases.Instance):
@@ -318,14 +367,17 @@ class InterpolationInstance(bases.Instance):
     special_attributes = objectmodel.InterpolationModel()
 
     def __init__(
-        self, proxied: scoped_nodes.ClassDef, node: node_classes.Interpolation
-    ):
+        self,
+        proxied: scoped_nodes.ClassDef,
+        node: node_classes.Interpolation,
+        context: InferenceContext | None = None,
+    ) -> None:
         super().__init__(proxied)
         self._node = node
+        self._context = context.clone() if context is not None else None
 
     def interpolation_value(self) -> InferenceResult:
-        inferred = util.safe_infer(self._node.value)
-        return inferred if inferred is not None else util.Uninferable
+        return _infer_or_uninferable(self._context, self._node.value)
 
     def interpolation_expression(self) -> node_classes.Const:
         return node_classes.Const(self._node.str)
@@ -343,8 +395,7 @@ class InterpolationInstance(bases.Instance):
         # the rendered spec (itself a JoinedStr that infers to a ``str``).
         if self._node.format_spec is None:
             return node_classes.Const("")
-        inferred = util.safe_infer(self._node.format_spec)
-        return inferred if inferred is not None else util.Uninferable
+        return _infer_or_uninferable(self._context, self._node.format_spec)
 
 
 # Custom objects tailored for dictionary views

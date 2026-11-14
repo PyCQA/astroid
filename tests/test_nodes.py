@@ -2404,6 +2404,71 @@ class TestTemplateString:
             assert list(node.infer()) == [Uninferable]
             assert list(node.values[0].infer()) == [Uninferable]
 
+    @staticmethod
+    @pytest.mark.parametrize(
+        "code",
+        [
+            't"\'\\""',
+            't"a\\"{x}\'"',
+            "t\"{d['k']}\"",
+            't"{x:\'>10}"',
+            "t'{x:\">10}'",
+            "t\"{d['k']:\\\">10}'\"",
+            "t\"{x:{'a'}}\"",
+            't"""line\nbreak {x}"""',
+            "t'{x=}'",
+        ],
+    )
+    def test_template_string_as_string_round_trip(code: str) -> None:
+        # The rendered t-string must parse back to the same AST, whatever
+        # quotes the literal parts and the format specs contain.
+        node = builder.extract_node(code)
+        round_tripped = builder.extract_node(node.as_string())
+        assert round_tripped.repr_tree() == node.repr_tree()
+
+    def test_template_string_dunder_members(self) -> None:
+        # The usual instance attributes still work on the special models.
+        template = next(builder.extract_node('t"{1}"').infer())
+        assert self._member(template, "__class__").qname() == (
+            "string.templatelib.Template"
+        )
+        assert isinstance(self._member(template, "__doc__"), nodes.Const)
+        interpolation = self._member(template, "interpolations").elts[0]
+        assert self._member(interpolation, "__class__").qname() == (
+            "string.templatelib.Interpolation"
+        )
+
+    def test_template_string_members_keep_call_context(self) -> None:
+        # The interpolated expressions are inferred in the context the t-string
+        # was inferred in, so call arguments resolve.
+        node = builder.extract_node(textwrap.dedent("""
+        def greet(name, width):
+            return t"hi {name:>{width}}"
+        greet("Ada", 5)  #@
+        """))
+        template = next(node.infer())
+        assert self._const_tuple(self._member(template, "values")) == ["Ada"]
+        interpolation = self._member(template, "interpolations").elts[0]
+        assert self._member(interpolation, "value").value == "Ada"
+        assert self._member(interpolation, "format_spec").value == ">5"
+
+    def test_template_string_concatenation(self) -> None:
+        node = builder.extract_node('t"a {1}" + t"b {2}"')
+        template = next(node.infer())
+        assert template.pytype() == "string.templatelib.Template"
+        assert self._const_tuple(self._member(template, "strings")) == [
+            "a ",
+            "b ",
+            "",
+        ]
+        assert self._const_tuple(self._member(template, "values")) == [1, 2]
+
+    @staticmethod
+    def test_template_string_concatenation_with_str() -> None:
+        # ``Template + str`` raises ``TypeError`` at runtime.
+        node = builder.extract_node('t"a {1}" + "b"')
+        assert list(node.infer()) == [Uninferable]
+
 
 @pytest.mark.parametrize(
     "node",

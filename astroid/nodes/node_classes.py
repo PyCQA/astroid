@@ -5556,9 +5556,9 @@ def _infer_templatelib_instance(
         yield util.Uninferable
         return
     if isinstance(node, TemplateStr):
-        yield objects.TemplateStrInstance(inferred_cls, node)
+        yield objects.TemplateStrInstance(inferred_cls, node, context)
     else:
-        yield objects.InterpolationInstance(inferred_cls, node)
+        yield objects.InterpolationInstance(inferred_cls, node, context)
 
 
 class TemplateStr(NodeNG):
