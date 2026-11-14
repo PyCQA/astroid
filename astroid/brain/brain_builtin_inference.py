@@ -192,17 +192,19 @@ def on_bootstrap():
     )
 
 
-def _builtin_filter_predicate(node, builtin_name) -> bool:
+def _builtin_dispatch_predicate(node: nodes.Call) -> bool:
     # pylint: disable = too-many-boolean-expressions
+    # This runs on every Call node, so the checks are ordered by cost: each one
+    # is a constant-time attribute or type check, except ``node.root()``, which
+    # walks up every parent to the module and must stay last.
     if (
-        builtin_name == "type"
-        and node.root().name == "re"
-        and isinstance(node.func, nodes.Name)
+        isinstance(node.func, nodes.Name)
         and node.func.name == "type"
         and isinstance(node.parent, nodes.Assign)
         and len(node.parent.targets) == 1
         and isinstance(node.parent.targets[0], nodes.AssignName)
         and node.parent.targets[0].name in {"Pattern", "Match"}
+        and node.root().name == "re"
     ):
         # Handle re.Pattern and re.Match in brain_re
         # Match these patterns from stdlib/re.py
@@ -212,7 +214,7 @@ def _builtin_filter_predicate(node, builtin_name) -> bool:
         # ```
         return False
     if isinstance(node.func, nodes.Name):
-        return node.func.name == builtin_name
+        return node.func.name in _BUILTIN_INFERENCE_FUNCS
     if isinstance(node.func, nodes.Attribute):
         return (
             node.func.attrname == "fromkeys"
@@ -222,39 +224,30 @@ def _builtin_filter_predicate(node, builtin_name) -> bool:
     return False
 
 
-def register_builtin_transform(
-    manager: AstroidManager, transform, builtin_name
-) -> None:
-    """Register a new transform function for the given *builtin_name*.
+def _builtin_dispatch_transform(
+    node: nodes.Call, context: InferenceContext | None = None
+) -> Iterator:
+    func = node.func
+    if isinstance(func, nodes.Name):
+        builtin_name = func.name
+    else:
+        builtin_name = "dict.fromkeys"
+    transform = _BUILTIN_INFERENCE_FUNCS[builtin_name]
+    result = transform(node, context=context)
+    if result:
+        if not result.parent:
+            # Let the transformation function determine
+            # the parent for its result. Otherwise,
+            # we set it to be the node we transformed from.
+            result.parent = node
 
-    The transform function must accept two parameters, a node and
-    an optional context.
-    """
-
-    def _transform_wrapper(
-        node: nodes.Call, context: InferenceContext | None = None
-    ) -> Iterator:
-        result = transform(node, context=context)
-        if result:
-            if not result.parent:
-                # Let the transformation function determine
-                # the parent for its result. Otherwise,
-                # we set it to be the node we transformed from.
-                result.parent = node
-
-            if result.lineno is None:
-                result.lineno = node.lineno
-            # Can be a 'Module' see https://github.com/pylint-dev/pylint/issues/4671
-            # We don't have a regression test on this one: tread carefully
-            if hasattr(result, "col_offset") and result.col_offset is None:
-                result.col_offset = node.col_offset
-        return iter([result])
-
-    manager.register_transform(
-        nodes.Call,
-        inference_tip(_transform_wrapper),
-        partial(_builtin_filter_predicate, builtin_name=builtin_name),
-    )
+        if result.lineno is None:
+            result.lineno = node.lineno
+        # Can be a 'Module' see https://github.com/pylint-dev/pylint/issues/4671
+        # We don't have a regression test on this one: tread carefully
+        if hasattr(result, "col_offset") and result.col_offset is None:
+            result.col_offset = node.col_offset
+    return iter([result])
 
 
 def _container_generic_inference(
@@ -1162,27 +1155,43 @@ def _infer_str_format_call(
     return iter([nodes.const_factory(formatted_string)])
 
 
+# Mapping of builtin name → inference function, consumed by the single
+# dispatcher transform registered for ``nodes.Call``. One transform-list entry
+# per builtin would run its own predicate on every Call node; the dispatcher
+# does the ``isinstance``/name lookup once and routes via this dict.
+_BuiltinInferFn = Callable[
+    [nodes.Call, InferenceContext | None], SuccessfulInferenceResult | None
+]
+_BUILTIN_INFERENCE_FUNCS: dict[str, _BuiltinInferFn] = {
+    "bool": infer_bool,
+    "super": infer_super,
+    "callable": infer_callable,
+    "property": infer_property,
+    "getattr": infer_getattr,
+    "hasattr": infer_hasattr,
+    "tuple": infer_tuple,
+    "set": infer_set,
+    "list": infer_list,
+    "dict": infer_dict,
+    "frozenset": infer_frozenset,
+    "type": infer_type,
+    "slice": infer_slice,
+    "isinstance": infer_isinstance,
+    "issubclass": infer_issubclass,
+    "len": infer_len,
+    "str": infer_str,
+    "int": infer_int,
+    "dict.fromkeys": infer_dict_fromkeys,
+}
+
+
 def register(manager: AstroidManager) -> None:
-    # Builtins inference
-    register_builtin_transform(manager, infer_bool, "bool")
-    register_builtin_transform(manager, infer_super, "super")
-    register_builtin_transform(manager, infer_callable, "callable")
-    register_builtin_transform(manager, infer_property, "property")
-    register_builtin_transform(manager, infer_getattr, "getattr")
-    register_builtin_transform(manager, infer_hasattr, "hasattr")
-    register_builtin_transform(manager, infer_tuple, "tuple")
-    register_builtin_transform(manager, infer_set, "set")
-    register_builtin_transform(manager, infer_list, "list")
-    register_builtin_transform(manager, infer_dict, "dict")
-    register_builtin_transform(manager, infer_frozenset, "frozenset")
-    register_builtin_transform(manager, infer_type, "type")
-    register_builtin_transform(manager, infer_slice, "slice")
-    register_builtin_transform(manager, infer_isinstance, "isinstance")
-    register_builtin_transform(manager, infer_issubclass, "issubclass")
-    register_builtin_transform(manager, infer_len, "len")
-    register_builtin_transform(manager, infer_str, "str")
-    register_builtin_transform(manager, infer_int, "int")
-    register_builtin_transform(manager, infer_dict_fromkeys, "dict.fromkeys")
+    # Builtins inference, through a single dispatcher (#1115)
+    manager.register_transform(
+        nodes.Call,
+        inference_tip(_builtin_dispatch_transform),
+        _builtin_dispatch_predicate,
+    )
 
     # Infer object.__new__ calls
     manager.register_transform(
