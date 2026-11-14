@@ -1,5 +1,0 @@
-``astroid.brain.brain_builtin_inference.register_builtin_transform`` was removed.
-Builtin inference functions now live in a static dispatch table used by a single
-``nodes.Call`` transform.
-
-Refs #1115
