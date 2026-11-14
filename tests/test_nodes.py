@@ -2542,6 +2542,35 @@ def test_inferred_values_are_named(code: str) -> None:
         assert isinstance(inferred.pytype(), str), source
 
 
+SCOPES = """
+def function(): ...
+async def coroutine_function(): ...
+class Class: ...
+lambda: 1
+(x for x in y)
+[x for x in y]
+{x for x in y}
+{x: x for x in y}
+"""
+
+
+def test_scopes_are_named() -> None:
+    """Every scope has a name and a qualified name, so that code reading them
+    on ``node.scope()`` does not need to guard.
+    """
+    scopes = list(parse(SCOPES).nodes_of_class(nodes.LocalsDictNodeNG))
+    scope_classes = {
+        node_class
+        for node_class in nodes.ALL_NODE_CLASSES
+        if isinstance(node_class, type)
+        and issubclass(node_class, nodes.LocalsDictNodeNG)
+    } - {nodes.LocalsDictNodeNG, nodes.ComprehensionScope}
+    assert {type(scope) for scope in scopes} == scope_classes
+    for scope in scopes:
+        assert isinstance(scope.name, str), scope
+        assert isinstance(scope.qname(), str), scope
+
+
 def test_slice_name() -> None:
     """An inferred ``slice`` object has the name of its type, like other builtins."""
     node = extract_node("slice(1, 2)")
