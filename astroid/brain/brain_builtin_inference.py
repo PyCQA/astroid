@@ -194,14 +194,17 @@ def on_bootstrap():
 
 def _builtin_dispatch_predicate(node: nodes.Call) -> bool:
     # pylint: disable = too-many-boolean-expressions
+    # This runs on every Call node, so the checks are ordered by cost: each one
+    # is a constant-time attribute or type check, except ``node.root()``, which
+    # walks up every parent to the module and must stay last.
     if (
         isinstance(node.func, nodes.Name)
         and node.func.name == "type"
-        and node.root().name == "re"
         and isinstance(node.parent, nodes.Assign)
         and len(node.parent.targets) == 1
         and isinstance(node.parent.targets[0], nodes.AssignName)
         and node.parent.targets[0].name in {"Pattern", "Match"}
+        and node.root().name == "re"
     ):
         # Handle re.Pattern and re.Match in brain_re
         # Match these patterns from stdlib/re.py
