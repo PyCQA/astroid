@@ -388,6 +388,11 @@ def infer_special_alias(
         res = next(node.args[0].infer(context=ctx))
     except StopIteration as e:
         raise InferenceError(node=node.args[0], context=ctx) from e
+    if not isinstance(res, nodes.ClassDef):
+        # e.g. Uninferable when the inference budget of ``ctx`` is exhausted.
+        # Don't build and pin a class without its base: a later inference
+        # with a fresh context must still get the right one.
+        raise UseInferenceDefault
 
     assign_name = node.parent.targets[0]
     class_def = nodes.ClassDef(
@@ -398,9 +403,7 @@ def infer_special_alias(
         end_lineno=assign_name.end_lineno,
         end_col_offset=assign_name.end_col_offset,
     )
-    # ``res`` is Uninferable if the inference budget of ``ctx`` is exhausted.
-    bases = [res] if isinstance(res, nodes.ClassDef) else []
-    class_def.postinit(bases=bases, body=[], decorators=None)
+    class_def.postinit(bases=[res], body=[], decorators=None)
     func_to_add = _extract_single_node(CLASS_GETITEM_TEMPLATE)
     class_def.locals["__class_getitem__"] = [func_to_add]
     # Avoid re-instantiating this class every time it's seen
