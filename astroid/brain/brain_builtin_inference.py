@@ -192,6 +192,61 @@ def on_bootstrap():
     )
 
 
+def _builtin_dispatch_predicate(node: nodes.Call) -> bool:
+    # pylint: disable = too-many-boolean-expressions
+    if (
+        isinstance(node.func, nodes.Name)
+        and node.func.name == "type"
+        and node.root().name == "re"
+        and isinstance(node.parent, nodes.Assign)
+        and len(node.parent.targets) == 1
+        and isinstance(node.parent.targets[0], nodes.AssignName)
+        and node.parent.targets[0].name in {"Pattern", "Match"}
+    ):
+        # Handle re.Pattern and re.Match in brain_re
+        # Match these patterns from stdlib/re.py
+        # ```py
+        # Pattern = type(...)
+        # Match = type(...)
+        # ```
+        return False
+    if isinstance(node.func, nodes.Name):
+        return node.func.name in _BUILTIN_INFERENCE_FUNCS
+    if isinstance(node.func, nodes.Attribute):
+        return (
+            node.func.attrname == "fromkeys"
+            and isinstance(node.func.expr, nodes.Name)
+            and node.func.expr.name == "dict"
+        )
+    return False
+
+
+def _builtin_dispatch_transform(
+    node: nodes.Call, context: InferenceContext | None = None
+) -> Iterator:
+    func = node.func
+    if isinstance(func, nodes.Name):
+        builtin_name = func.name
+    else:
+        builtin_name = "dict.fromkeys"
+    transform = _BUILTIN_INFERENCE_FUNCS[builtin_name]
+    result = transform(node, context=context)
+    if result:
+        if not result.parent:
+            # Let the transformation function determine
+            # the parent for its result. Otherwise,
+            # we set it to be the node we transformed from.
+            result.parent = node
+
+        if result.lineno is None:
+            result.lineno = node.lineno
+        # Can be a 'Module' see https://github.com/pylint-dev/pylint/issues/4671
+        # We don't have a regression test on this one: tread carefully
+        if hasattr(result, "col_offset") and result.col_offset is None:
+            result.col_offset = node.col_offset
+    return iter([result])
+
+
 def _container_generic_inference(
     node: nodes.Call,
     context: InferenceContext | None,
@@ -1125,61 +1180,6 @@ _BUILTIN_INFERENCE_FUNCS: dict[str, _BuiltinInferFn] = {
     "int": infer_int,
     "dict.fromkeys": infer_dict_fromkeys,
 }
-
-
-def _builtin_dispatch_predicate(node: nodes.Call) -> bool:
-    # pylint: disable = too-many-boolean-expressions
-    func = node.func
-    if isinstance(func, nodes.Name):
-        name = func.name
-        if name not in _BUILTIN_INFERENCE_FUNCS:
-            return False
-        if (
-            name == "type"
-            and node.root().name == "re"
-            and isinstance(node.parent, nodes.Assign)
-            and len(node.parent.targets) == 1
-            and isinstance(node.parent.targets[0], nodes.AssignName)
-            and node.parent.targets[0].name in {"Pattern", "Match"}
-        ):
-            # Handle re.Pattern and re.Match in brain_re — they look like
-            # ``Pattern = type(...)`` / ``Match = type(...)`` in stdlib/re.py
-            # and must not be inferred as the builtin ``type`` call.
-            return False
-        return True
-    if isinstance(func, nodes.Attribute):
-        return (
-            func.attrname == "fromkeys"
-            and isinstance(func.expr, nodes.Name)
-            and func.expr.name == "dict"
-        )
-    return False
-
-
-def _builtin_dispatch_transform(
-    node: nodes.Call, context: InferenceContext | None = None
-) -> Iterator:
-    func = node.func
-    if isinstance(func, nodes.Name):
-        builtin_name = func.name
-    else:
-        builtin_name = "dict.fromkeys"
-    transform = _BUILTIN_INFERENCE_FUNCS[builtin_name]
-    result = transform(node, context=context)
-    if result:
-        if not result.parent:
-            # Let the transformation function determine
-            # the parent for its result. Otherwise,
-            # we set it to be the node we transformed from.
-            result.parent = node
-
-        if result.lineno is None:
-            result.lineno = node.lineno
-        # Can be a 'Module' see https://github.com/pylint-dev/pylint/issues/4671
-        # We don't have a regression test on this one: tread carefully
-        if hasattr(result, "col_offset") and result.col_offset is None:
-            result.col_offset = node.col_offset
-    return iter([result])
 
 
 def register(manager: AstroidManager) -> None:
